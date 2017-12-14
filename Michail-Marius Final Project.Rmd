@@ -1,0 +1,335 @@
+---
+title: "GRAD-E1244 Final Project"
+author: "Marius Kat & Michail Schuch"
+date: "15 Dezember 2017"
+output:
+  
+  html_document: default
+  pdf_document: default
+---
+#0. Introduction
+
+The dataset ACLED (Armed Conflict Location & Event Data Project) shows dates and locations of all reported political violence and protest events in over 60 developing countries. Within the scope of our final project, we are focussing on the available data about Africa. This project covers all African countries from January 1997 to December 2016, including information about different types of conflicts, the various actors involved in each event, geographical coordinates, fatalities and other information. The __objective__ is to find out where and why violent conflicts broke out and how they developed over time. In order to better understand factors correlating with the occurance of conflicts, we added additional data provided by the World Bank that can be used for our regression analysis. Our paper is structured as followed: 
+
+1. Preparation of the Dataset
+2. Exploratory data analysis
+3. Statistical analysis
+4. Summary and conclusion
+
+#1. Preparation of the Datset
+##1 a) ACLED Dataset
+
+The first step is to clean and manipulate the datasets in order to conduct a decent analysis. After installing the necessary R packages the ACLED dataset has to be imported:
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+# Installing the packages:
+library(stringr)
+library(leaflet)
+library(readr)
+library(tidyverse)
+library(plotly)
+library(memisc)
+library(dplyr)
+library(data.table)
+
+# Importing the ACLED dataset:
+Africa <- read_csv("~/Final-Project-Michail-Marius-/ACLED-Version-7-All-Africa-1997-2016_csv_dyadic-file.csv")
+```
+
+The dataset appears to be tidy with each variable forming a column, each observation forming a row, and each type of observational unit forming a table. However, some modifications have to be made for the analyses below:
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+# Removing unnecessary columns
+Africa = subset(Africa, select = -c(X26:X36))
+
+# Renaming some variables
+Africa$INTER1 = gsub("1","Government or mutinous force", Africa$INTER1)
+Africa$INTER1 = gsub("2","Rebel force", Africa$INTER1)
+Africa$INTER1 = gsub("3","Political militia", Africa$INTER1)
+Africa$INTER1 = gsub("4","Ethnic militia", Africa$INTER1)
+Africa$INTER1 = gsub("5","Rioters", Africa$INTER1)
+Africa$INTER1 = gsub("6","Protesters", Africa$INTER1)
+Africa$INTER1 = gsub("7","Civilians", Africa$INTER1)
+Africa$INTER1 = gsub("8","Outside/external force (e.g. UN)", Africa$INTER1)
+```
+
+##1 b) World Bank Dataset
+
+The World Bank dataset provides interesting additional information, such as the GDP per capita or numbers of refugees. This data may reveal relationships between variables in the course of the regression analysis. Contrary to the ACLED dataset, the World Bank dataset is not tidy and needs to be cleaned before both can be merged:
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+# Importing World Bank data
+WBData <-read_csv("Data_World_Bank.csv")
+
+# Cleaning the World Bank dataset
+WBDataTidy <- WBData %>% gather(key = year, value = value, '1997 [YR1997]':'2016 [YR2016]', na.rm=TRUE)
+WBDataTidy$`Series Code` <- NULL
+WBDataTidy2 <- WBDataTidy %>% spread(key='Series Name', value = value)
+WBDataTidy3 <- WBDataTidy2 %>% separate(year, into = c("YEAR", "weird"), sep= " ")
+WBDataTidy3$weird <- NULL
+setnames(WBDataTidy3, c("Country Name", 
+                        "Country Code", 
+                        "GDP per capita (constant 2010 US$)", 
+                        "Refugee population by country or territory of asylum",
+                        "Population, total",
+                        "Population density (people per sq. km of land area)",
+                        "Employment to population ratio, 15+, total (%) (modeled ILO estimate)",
+                        "GDP growth (annual %)"),
+                      c("COUNTRY",
+                        "CODE",
+                        "GDPcapita",
+                        "refugees",
+                        "population",
+                        "populationdensity",
+                        "employment",
+                        "GDPgrowth"))
+
+WBDataTidy3$COUNTRY = gsub("Congo, Dem. Rep.","Democratic Republic of Congo",WBDataTidy3$COUNTRY)
+WBDataTidy3$COUNTRY = gsub("Congo, Rep.","Republic of Congo",WBDataTidy3$COUNTRY)
+WBDataTidy3$COUNTRY = gsub("Cote d'Ivoire","Ivory Coast",WBDataTidy3$COUNTRY)
+WBDataTidy3$COUNTRY = gsub("Egypt, Arab Rep.", "Egypt", WBDataTidy3$COUNTRY)
+WBDataTidy3$COUNTRY = gsub("Gambia, The", "Gambia", WBDataTidy3$COUNTRY)
+
+WBDataTidy3 <- WBDataTidy3 %>% transform(YEAR = as.numeric(YEAR))
+WBDataTidy3 <- WBDataTidy3 %>% transform(GDPcapita= as.numeric(GDPcapita))
+WBDataTidy3 <- WBDataTidy3 %>% transform(refugees = as.numeric(refugees))
+WBDataTidy3 <- WBDataTidy3 %>% transform(population = as.numeric(population))
+WBDataTidy3 <- WBDataTidy3 %>% transform(populationdensity = as.numeric(populationdensity))
+WBDataTidy3 <- WBDataTidy3 %>% transform(employment = as.numeric(employment))
+
+#Merging the ACLED and Word Bank datasets
+Africa2 <- left_join(Africa, WBDataTidy3, by = c("COUNTRY", "YEAR"), sort=FALSE)
+```
+\newpage
+
+#2. Exploratory Data Analysis
+
+In this chapter, an exploratory data analysis will be conducted in order to visualize relevant descriptive facts and patterns. Any findings provide the basis for running the statistical model in the next chapter. The compiled graphs, furthermore, will be conducive in finding out where violent conflicts in Africa broke out and how they developed over time.
+
+###Figure 2.1
+Figure 2.1 shows how many events per actor occurred each year over the total time period from 1997 to 2016. It differentiates between the various types of actors, each in another color:
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for the Figure 2.1
+Africa2  %>% ggplot(mapping = aes(x=YEAR, group=INTER1, color=INTER1)) + 
+  geom_smooth(stat = "count") + labs(x = "Year", y = "Number of Events", title = "Violence per Actor and Year", color="Actor Instigating Conflict") +scale_color_discrete(limits=c("Government or mutinous force", "Protesters", "Political militia", "Rioters", "Ethnic militia", "Rebel force", "Outside/external force (e.g. UN)", "Civilians"))
+```
+
+###Figure 2.2
+Figure 2.2 shows the amount of the different types of events per year:
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for Figure 2.2
+Africa2 %>% ggplot(mapping = aes(x = YEAR, fill=EVENT_TYPE)) + 
+  geom_bar(stat = "count") +labs(x = "Year", y = "Number of Events", 
+                                 title = "Type of Event per Year", 
+                                 fill= "Type of Event") + 
+  theme(legend.position="right")
+```
+
+
+Figures 2.1 and 2.2 provide interesting insights of how the different types of events developed over time and which actors  were involved accordingly. Figure 2.2 shows that the number of events stays relatively constant until the year of 2010 but subsequently surges until 2016. While the period between 1997 and 2010 is dominated by battles without change of territory and violence against civilians, the incidents that include riots/protests increased drastically between 2010 and 2016.
+
+According to the _ACLED user guide_, protests are defined as non-violent spontaneous groupings with protesters, while riots are violent and populated by rioters. Figure 2.1 shows that the incidents connected to riots/protests  seem to be caused rather by protesters than by rioters. Furthermore, it reveals that over the observed time, the actor groups "government or mutinous force" and "political militia" became the main agents of violent events parallel to an increasing number of protesters.
+
+As reported by Raleigh [^1], militia groups have emerged as one of the main instruments of political violence during a time of institutional reform across African states. The period of institutional reforms coincides with the period of our observations. A rising number of protests can be caused by discontent of the population with its respective regimes during a time of profound political transitions. This, consequently, induces a breeding ground for the formation of political militias which results in a escalating number of violent events.
+
+[^1]: Raleigh, Clionadh (2016) Pragmatic and Promiscuous: Explaining the Rise of Competitive Political Militias across Africa. Journal of Conflict Resolution (Vol. 60(2) 283-310). Sage.
+
+
+###Figure 2.3
+Figure 2.3 shows a map of Africa and how the number of fatalities evolved on the continent between 1997 and 2016. In the course of time, some areas appear to have very low densities of violent incidents. Those areas, indeed, show Africa's geographical landscape of deserts and mountains which are sparsely populated. The remaining regions indicate urban areas with higher populations and almost all of them are affected by violent events to a greater or lesser extent.
+
+It becomes apparent in the animation that the number of violent events are slowly and constantly increasing. Futhermore, different 'hotspots' of violence can be observed with frequent events of more than 100 fatalities. These can be found in particular across the countries at the equator such as Somalia, Kenia, Uganda, South Sudan and Nigeria. Especially starting from 2008-2010, conflicts in this area became more violent, with more frequent and more deadly conflicts. This can be ascribed to diffcult and controversial elections in many of those countries between 2008 and 2010[^1].
+
+From the year 2010 until the end of the observation period in 2016, the number increased abruptly and is more concentrated in certain countries and with a higher number of fatalities (indicated by many red dots). Besides the already mentioned areas around the equator, high numbers are clearly evident in the north of Africa. This represents the incidents around the Arab Spring revolutions which began in December 2010 and affected countries like Tunisia, Libya, and Egypt.
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for Figure 2.3
+Africa2 <- Africa2 %>% transform(FATALITIES = as.numeric(FATALITIES))
+Africa2$fatcal[Africa2$FATALITIES <= 10] <- '0 to 10 fatalities'
+Africa2$fatcal[10 < Africa2$FATALITIES & Africa2$FATALITIES <= 50] <- '10 to 50 fatalities'
+Africa2$fatcal[50 < Africa2$FATALITIES & Africa2$FATALITIES  <= 100] <- '50 to 100 fatalities'
+Africa2$fatcal[Africa2$FATALITIES > 100] <- 'Over 100 fatalities'
+
+g <- list(
+  scope = 'africa',
+  projection = list(type = 'Mercator'),
+  showland = TRUE,
+  landcolor = toRGB("gray85"),
+  subunitwidth = 1,
+  countrywidth = 1,
+  subunitcolor = toRGB("white"),
+  countrycolor = toRGB("white")
+)
+
+plot_geo(Africa2, locationmode = 'country names') %>% 
+  add_markers(x = ~LONGITUDE, y = ~LATITUDE, color = ~fatcal, frame=~YEAR,
+              text = ~paste(FATALITIES, "fatalities")
+   ) %>% layout(title = 'Violent events in Africa by amounts of fatalities <br>(Click legend to toggle)', geo = g)
+
+```
+
+
+###Figure 2.4
+In addition to figure 2.3, figure 2.4 shows an overview of the number of conflicts per year. The animation corresponds to the numbers of events in figure 2.3. Additionally, it shows clearer which countries are affected most by conflicts. From 2006 on, Somalia constantly had more than 1500 violent conflicts per year. That year, the Transitional Federal Government (TFG), assisted by Ethiopian troops, assumed control of most of the nation's southern conflict zones from the newly formed Islamic Courts Union (ICU). The ICU subsequently splintered into more radical groups such as Al-Shabaab, which battled the TFG and its AMISOM allies for control of the region [^2]. 
+
+Those facts are also supported by figure 2.2, that indicates a rising number political militias. Similar conclusions can be drawn, for instance, from Egypt or Sudan. The animation shows a higher number of violent incidents in the aftermath of the Arab Spring revolution that led to the Egyptian crisis from 2011 onwards. A high number of violent conflicts are, furthermore, visible in Sudan in 2011, which are peaking in the years 2013 to 2016. This corresponds to South Sudan's independence from the Republic of Sudan. In 2013, a civil war broke out which explains the high number of violent events during that time [^3].
+
+[^2]: "Somalia". The World Factbook. Langley, Virginia: Central Intelligence Agency.
+
+[^3]: "Sudan". The World Factbook. Langley, Virginia: Central Intelligence Agency.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for Figure 2.4
+Africa8 <- Africa2 %>% group_by(COUNTRY, CODE, YEAR) %>% summarise(numberconflicts=n())
+
+l <- list(color = toRGB("grey"), width = 1)
+g <- list(
+  scope = 'africa',
+  projection = list(type = 'Mercator'),
+  showland = TRUE,
+  landcolor = toRGB("gray85"),
+  subunitwidth = 1,
+  countrywidth = 1,
+  subunitcolor = toRGB("white"),
+  countrycolor = toRGB("white")
+)
+
+plot_geo(Africa8) %>%
+  add_trace(
+    z = ~numberconflicts, color = ~numberconflicts, colors = 'Blues',
+    text = ~COUNTRY,locations = ~CODE, marker = list(line = l), frame = ~YEAR
+  ) %>%
+  colorbar(title = 'number of conflicts', limits= c(0, 2000)) %>%
+  layout(title='Number of Conflicts per Country per Year',
+         geo = g)
+```
+
+
+###Figure 2.5
+Figure 2.5 completes the figures 2.3 and 2.4 by showing the most violent conflicts and which type of conflict occured in the respective area.
+
+Following the examplary selection of countries from figure 2.4, a high density of battles without change of territory (blue) and a concentration of battles where the government is regaining territory (red) are visible in the area of South Sudan. This determines an area of political turmoil before and after South Sudan declared its independence. 
+
+Another specific example in this map can be found in the Democratic Republic of Congo. When zooming into the map on the Lubutu territory, a large yeollow circle indicates that 25,000 people died there in an act of violence against civilians. Indeed, in 1997 the period of continental and civil wars broke out and claimed many victims.
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for Figure 2.5
+colourscheme <- colorFactor(c("red","blue","green","grey","orange", "purple", "pink", "black", "yellow"), Africa2$EVENT_TYPE)
+mostviolentattacks <- Africa2 %>% filter(FATALITIES>50)
+leaflet(mostviolentattacks) %>% addTiles() %>% addCircles(lng=  ~LONGITUDE, lat = ~LATITUDE, radius = ~FATALITIES*10, 
+                                                          color=~colourscheme(EVENT_TYPE), label = ~paste('On', EVENT_DATE,',', FATALITIES, 'people died in', LOCATION, ',',COUNTRY)) %>% 
+  addLegend("bottomright", pal = colourscheme, values = ~EVENT_TYPE, title = "Most Violent Conflicts in Africa (over 50 causalties) </br> by Event Type")
+
+```
+
+
+###Figure 2.6
+Figure 2.6 completes the findings of the previous graphs and maps and arranges the countries according to the number of conflict events. For example, as seen in figure 2.4, Somalia suffered from large scale conflicts since 2006. This implies a high number of violent events and explains its top position. Interesting, however, is that the number of conflicts seems to only weakly correlate to the number of casualties. For example, while Sudan had 35,000 fatalities from 1997-2016, Angola had almost 144,000, even though Angola had much fewer violent events.  
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for Figure 2.6
+Africa9 <- Africa2 %>% group_by(COUNTRY) %>% summarise(numberofconflictscountry=n(), numberoffatalities=sum(FATALITIES))
+Africa9 %>% plot_ly(x = ~(reorder(COUNTRY, numberofconflictscountry))) %>% 
+  add_trace(y = ~numberofconflictscountry, type='bar', name='Number of Conflict Events')  %>% 
+  add_trace(y = ~numberoffatalities, type='scatter', mode='marker', yaxis='y2', name='Number of Fatalities', hoverinfo = "text",
+            text = ~paste(numberoffatalities, ' fatalities in', COUNTRY)) %>% 
+  layout(title = "events and fatalities per country",
+         xaxis = list(title = "country"),
+         yaxis = list(side='left', title = "number of events", rangemode="tozero", showgrid = FALSE, zeroline = FALSE),
+         yaxis2 = list(side='right', overlaying="y", title = "number of fatalities", rangemode="tozero", showgrid = FALSE, zeroline = TRUE))
+```
+
+
+#3. Statistical Analysis
+
+While the ACLED dataset provides a comprehensive collection of political violence and protest data for African countries with information on the specific dates and locations of political violence and protest, the types of event, the groups involved, fatalities, and changes in territorial control, additional data helps us to better investigate correlations between the number of violent events and economical factors. This is why we added data from the World Bank that includes information on GDP per capita, the numbers of refugees, etc. Using regression analyses, we will investigate if correlations between economic factors and violence exists.
+
+
+###Figure 3.1
+Our first __hypothesis (H1)__ is a statistically significant relationship between the number of conflicts and the value of all final goods and services produced within a country in a given year per capita, namely the GDP per capita. Our __null hypothesis (H0)__ is, therefore, no statistical significance between these variables. Since a higher GDP is usually prevalent in countries with political stability and a functioning economy, we assume that a lower number of violent conflicts is related to a higher GDP per capita. The first graph shows the correlation between the number of violent conflicts and the GDP per capita. By observing the plotly graph, some outliers become apparent, which particularly are caused by the data of South Africa. Referring to its historical past, South Africa represents an exception on the continent. Its economy is the second-largest in Africa, and the 34th-largest in the world. It also has a relatively high GDP per capita compared to other countries in Sub-Saharan Africa [^4]. 
+
+[^4]: "South Africa". International Monetary Fund.
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for figure 3.1
+conflictyearcountry <-Africa %>% group_by(COUNTRY, YEAR) %>% summarise(numberofconflictsyear=n())
+Africa3 <- left_join(conflictyearcountry, WBDataTidy3, by = c("COUNTRY", "YEAR"), sort=FALSE)
+Africa3$numberofconflictsyear<-as.numeric(Africa3$numberofconflictsyear)
+
+plot_ly(Africa3, x=~GDPcapita, y=~numberofconflictsyear, type = 'scatter', mode = 'markers', hoverinfo = 'text', text = ~paste(COUNTRY, YEAR))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for linear regression of figure 3.1
+linearMod <- lm(numberofconflictsyear~GDPcapita, data = Africa3)
+print(linearMod)
+summary(linearMod)
+```
+
+Although the graph seems to display some kind of relation visually, the results from the linear regression of the number of conflicts per year and the GDP per capita do not show statistical significance. With a p-value of 0.65 > 0.05, we cannot reject the null hypothesis. 
+
+###Figure 3.2
+In an attempt to generate better results for the regression analysis, we excluded South Africa as an outlier. As can be seen in graph 3.2, the number of violent conflicts is condensed at a lower level of the GDP per capita. There seems to be a certain threshold at a GDP per capita rate of USD 5000 after which very few violent conflicts occur. Furthermore, although the curve in the graph is very flat - almost horizontal - it seems to provide a negative correlation between the two variables. 
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for figure 3.2
+Africa4 <- Africa3 %>% filter(COUNTRY!="South Africa")
+Africa4 %>% ggplot(mapping=aes(x=GDPcapita, y=numberofconflictsyear)) + geom_point() + geom_smooth()
+```
+
+Creating various statistical models with South Africa removed yields the following results:
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for linear regression of figure 3.2 (without South Africa)
+
+Africa4 <- Africa3 %>% filter(COUNTRY!="South Africa")
+
+ConflictMod1 <- lm(numberofconflictsyear~GDPcapita, data = Africa4)
+ConflictMod2 <- lm(numberofconflictsyear~GDPcapita+YEAR, data = Africa4)
+ConflictMod3 <- lm(numberofconflictsyear~GDPcapita+YEAR+populationdensity, data = Africa4)
+ConflictMod4 <- lm(numberofconflictsyear~GDPcapita+YEAR+populationdensity+employment, data = Africa4)
+
+mtable('Model 1' = ConflictMod1, 'Model 2' = ConflictMod2,'Model 3' = ConflictMod3,'Model 4' = ConflictMod4)
+
+```
+From the above we can thus see that there are various factors that statistically correlate with our dependent variable. Particularly interesting for our hypothesis is that, controlling for the year, the population density and the level of employment, every additional $1000 GDP per capita is correlated with 9 less conflicts per year. Since this is significant at the 0.05% level, we can reject the null hypothesis. Furthermore it is interesting that not only the year, but also the population density and the level of employment are correlated with the number of conflicts per year.
+
+###Figure 3.3
+
+Our second hypothesis (H2) is that there is a statistically significant relationship between the number of fatalities per year and the GDP per capita. As could be seen in figure 2.3, many conflict events occuring in e.g. South Africa have a low number of fatalities. We might thus hypothesise that, even if GDP/capita does not help to reduce the number of conflicts, it does help to reduce the number of fatalities at such conflicts. However, as can be seen from the table below, GDP per capita has no statistically significant correlation with the number of fatalities (point estimate is -0.041, standard deviation is 0.053). Our null hypothesis could therefore not be rejected.
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for figure 3.3
+Africa5 <- Africa2 %>% group_by(COUNTRY, YEAR) %>% summarise(numberoffatalitiesyear=sum(FATALITIES))
+Africa5 <- left_join(Africa5, WBDataTidy3, by = c("COUNTRY", "YEAR"), sort=FALSE)
+
+plot_ly(Africa5, x=~GDPcapita, y=~numberoffatalitiesyear, type = 'scatter', mode = 'markers', hoverinfo = 'text', text = ~paste(COUNTRY, YEAR))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for linear regression of figure 3.3
+
+
+FatalMod1 <- lm(numberoffatalitiesyear~GDPcapita, data = Africa5)
+FatalMod2 <- lm(numberoffatalitiesyear~GDPcapita+YEAR, data = Africa5)
+FatalMod3 <- lm(numberoffatalitiesyear~GDPcapita+YEAR+populationdensity, data = Africa5)
+FatalMod4 <- lm(numberoffatalitiesyear~GDPcapita+YEAR+populationdensity+employment, data = Africa5)
+
+mtable('Model 1' = FatalMod1, 'Model 2' = FatalMod2,'Model 3' = FatalMod3,'Model 4' = FatalMod4)
+```
+
+Overall it is interesting to notice that it is much harder to find correlations for the number of fatalities in a country any given year than to find correlations for the number of conflict events. The only significant correlation is the year: each year there were a point estimate of 68 fewer fatalities in any given country. It thus seems that, although the number of conflicts have increased over the years, the number of fatalities did not increase. As can be seen from  from figure 3.4 below, the number of casualties remained relatively stable after the highly violent conflicts of end-90s.
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+#Code for figure 3.4
+Africa5 %>% ggplot(mapping = aes(x = YEAR, y= numberoffatalitiesyear)) + 
+  geom_bar(stat = "identity") +labs(x = "Year", y = "Number of Fatalities", 
+                                 title = "Number of Fatalities per year")
+```
+ 
+#4. Summary and Conclusion
+
+By combining the outcomes of all graphs and maps in the exploratory analysis, a comprehensive overview of armed conflict locations and events is provided. The different graphs presented above take different approaches to show how violent conflicts evolved over time and give some insights into why such conflicts broke out. In the subsequent chapter discussed some of these ideas using a regression analysis.
+
+By conducting several regression analyses, we could identify factors with a statstically significant relationship to the number of violent events. When excluding South Africa, the number of conflicts per year are negatively related to the GDP per capita at the 5% level of significance. We could, therefore, reject our null hypothesis. Also other data, such as the population density and the level of employment, were significantly correlated to the occurance of conflict. Finding statistically significant covariates of the number of fatalities proved more difficult, however. Only 'year' was (negatively) correlated to this outcome.
+
+The exploratory analysis showed that militia groups have emerged as one of the main instruments of political violence during a time of institutional reform across African states. The statistical analysis derived a statistically significant relationship of violent events and a country's GDP/capita.
+
+
+
